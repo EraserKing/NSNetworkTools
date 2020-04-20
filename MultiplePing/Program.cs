@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading.Tasks;
@@ -35,9 +33,9 @@ namespace MultiplePing
 
             foreach (string ip in sourceIps)
             {
-                if (PingUtility.CheckIfIpValid(ip))
+                if (PingUtility.IfIPValid(ip))
                 {
-                    tasks.Add(Task.Run(() => Console.WriteLine(PingUtility.SendPings(ip))));
+                    tasks.Add(Task.Run(() => Console.WriteLine(PingReplyCollection.Run(ip))));
                 }
                 else
                 {
@@ -48,51 +46,61 @@ namespace MultiplePing
             var taskArray = tasks.ToArray();
             Task.WaitAll(taskArray);
             Console.WriteLine("ALL DONE");
-            
+
         }
     }
 
     public class PingReplyCollection
     {
         public PingReply[] Replies;
-        public string Ip;
+        public string IP;
 
-        public PingReplyCollection(string ip, IEnumerable<PingReply> replies)
+        private PingReplyCollection(string ip, IEnumerable<PingReply> replies)
         {
-            Ip = ip;
+            IP = ip;
             Replies = replies.ToArray();
+        }
+
+        public static PingReplyCollection Run(string ip)
+        {
+            return new PingReplyCollection(ip, PingUtility.SendPings(ip));
         }
 
         public double SuccessRate => 1.0 * Replies.Count(x => x.Status == IPStatus.Success) / Replies.Length;
         public double AverageRtt => Replies.Average(x => x.RoundtripTime);
-        public override string ToString() => $"{Ip}, Success Rate = {SuccessRate * 100.0}, Avg RTT = {AverageRtt}";
+        public override string ToString() => $"{IP}, Success Rate = {SuccessRate * 100.0}%, Avg RTT (ms) = {AverageRtt}";
     }
 
     public class PingUtility
     {
-        public static PingReplyCollection SendPings(string ip, int timeout = 1000, int count = 20)
+        private static readonly byte[] Buffer = Encoding.ASCII.GetBytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        private static PingOptions Options = new PingOptions()
+        {
+            DontFragment = true
+        };
+
+        public static PingReply[] SendPings(string ip, int timeout = 1000, int count = 20)
         {
             Ping pingSender = new Ping();
-            PingOptions options = new PingOptions()
-            {
-                DontFragment = true
-            };
-
-            byte[] buffer = Encoding.ASCII.GetBytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
             PingReply[] replies = new PingReply[count];
             for (int i = 0; i < count; i++)
             {
-                replies[i] = pingSender.Send(ip, timeout, buffer, options);
+                replies[i] = pingSender.Send(ip, timeout, Buffer, Options);
             }
 
-            return new PingReplyCollection(ip, replies);
+            return replies;
         }
 
-        public static bool CheckIfIpValid(string ip)
+        public static bool IfIPValid(string ip)
         {
             string[] ipSegments = ip.Split('.');
             if (ipSegments.Length != 4)
+            {
+                return false;
+            }
+            if (ipSegments.Any(x => !int.TryParse(x, out _)))
             {
                 return false;
             }

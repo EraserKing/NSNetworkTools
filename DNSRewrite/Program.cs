@@ -73,8 +73,8 @@ namespace DNSRewrite
                 foreach (string domain in domainLines)
                 {
                     var result = client.Query(domain, QueryType.A).Answers.ARecords().Select(x => x.Address);
-                    Console.WriteLine($"Query {domain} = {string.Join(',', result)}");
-                    domains[domain].AddRange(result.Where(x => !domains[domain].Contains(x)));
+                    Console.WriteLine($"Query {domain} = {string.Join(", ", result)}");
+                    domains[domain].AddRange(result);
                 }
                 Console.WriteLine();
             }
@@ -92,21 +92,17 @@ namespace DNSRewrite
             else
             {
                 Console.WriteLine("Ping all queried IPs");
-                List<string> totalIps = new List<string>();
-                foreach (string domain in domains.Keys)
-                {
-                    totalIps.AddRange(domains[domain].Select(x => x.ToString()).Where(x => !totalIps.Contains(x)));
-                }
+                List<string> totalIPs = domains.SelectMany(x => x.Value).Select(x => x.ToString()).Distinct().ToList();
 
                 ConcurrentDictionary<string, PingReplyCollection> pingResults = new ConcurrentDictionary<string, PingReplyCollection>();
                 List<Task> pingTasks = new List<Task>();
-                foreach(string ip in totalIps)
+                foreach (string ip in totalIPs)
                 {
                     pingTasks.Add(Task.Run(() =>
                     {
-                        var pingReplies = PingUtility.SendPings(ip);
-                        Console.WriteLine(pingReplies);
+                        PingReplyCollection pingReplies = PingReplyCollection.Run(ip);
                         pingResults.AddOrUpdate(ip, pingReplies, (ip, value) => value);
+                        Console.WriteLine(pingReplies);
                     }));
                 }
                 var pingTaskArray = pingTasks.ToArray();
@@ -119,14 +115,14 @@ namespace DNSRewrite
                     Console.WriteLine($">> {domain}");
 
                     var ips = domains[domain];
-                    var pingResultsOfDomain = ips.Select(x => pingResults[x.ToString()]);
+                    var pingResultsOfDomain = ips.Select(x => pingResults[x.ToString()]).Distinct();
 
                     Console.WriteLine(string.Join(Environment.NewLine, pingResultsOfDomain));
 
                     // All fail, means the domains bans ping - pick the first one
                     if (pingResultsOfDomain.All(x => x.SuccessRate == 0))
                     {
-                        finalResults.Add(new QueryResultCollection.QueryResult(domain, pingResultsOfDomain.First().Ip));
+                        finalResults.Add(new QueryResultCollection.QueryResult(domain, pingResultsOfDomain.First().IP));
                     }
 
                     // Else, pick the lowest RTT, but success rate > 0
@@ -144,17 +140,14 @@ namespace DNSRewrite
                             }
                         }
 
-                        finalResults.Add(new QueryResultCollection.QueryResult(domain, lowestRttReply.Ip));
+                        finalResults.Add(new QueryResultCollection.QueryResult(domain, lowestRttReply.IP));
                     }
                 }
             }
 
             Console.WriteLine();
             Console.WriteLine("Query results in the best combination");
-            foreach (var finalResult in finalResults)
-            {
-                Console.WriteLine(finalResult);
-            }
+            Console.WriteLine(string.Join(Environment.NewLine, finalResults));
         }
 
         public class QueryResultCollection : IEnumerable<QueryResultCollection.QueryResult>
@@ -176,15 +169,15 @@ namespace DNSRewrite
             public class QueryResult
             {
                 public string Domain { get; set; }
-                public string Ip { get; set; }
+                public string IP { get; set; }
 
                 public QueryResult(string domain, string ip)
                 {
                     Domain = domain;
-                    Ip = ip;
+                    IP = ip;
                 }
 
-                public override string ToString() => $"address=/{Domain}/{Ip}";
+                public override string ToString() => $"address=/{Domain}/{IP}";
             }
         }
     }
