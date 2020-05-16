@@ -35,7 +35,7 @@ namespace MultiplePing
             {
                 if (PingUtility.IfIPValid(ip))
                 {
-                    tasks.Add(Task.Run(() => Console.WriteLine(PingReplyCollection.Run(ip))));
+                    tasks.Add(Task.Run(() => Console.WriteLine(PingReplyMultiple.Run(ip))));
                 }
                 else
                 {
@@ -50,24 +50,27 @@ namespace MultiplePing
         }
     }
 
-    public class PingReplyCollection
+    public class PingReplyMultiple
     {
         public PingReply[] Replies;
         public string IP;
 
-        private PingReplyCollection(string ip, IEnumerable<PingReply> replies)
+        private double? successRate;
+        private double? averageRtt;
+
+        private PingReplyMultiple(string ip, IEnumerable<PingReply> replies)
         {
             IP = ip;
             Replies = replies.ToArray();
         }
 
-        public static PingReplyCollection Run(string ip)
+        public static PingReplyMultiple Run(string ip)
         {
-            return new PingReplyCollection(ip, PingUtility.SendPings(ip));
+            return new PingReplyMultiple(ip, PingUtility.SendPings(ip));
         }
 
-        public double SuccessRate => 1.0 * Replies.Count(x => x.Status == IPStatus.Success) / Replies.Length;
-        public double AverageRtt => Replies.Average(x => x.RoundtripTime);
+        public double SuccessRate => successRate ??= 1.0 * Replies.Count(x => x.Status == IPStatus.Success) / Replies.Length;
+        public double AverageRtt => averageRtt ??= Replies.Average(x => x.RoundtripTime);
         public override string ToString() => $"{IP}, Success Rate = {SuccessRate * 100.0}%, Avg RTT (ms) = {AverageRtt}";
     }
 

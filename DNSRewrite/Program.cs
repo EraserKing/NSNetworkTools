@@ -72,9 +72,16 @@ namespace DNSRewrite
                 Console.WriteLine($"DNS server is {client.NameServers.FirstOrDefault().Endpoint}, queries done below will be based on this");
                 foreach (string domain in domainLines)
                 {
-                    var result = client.Query(domain, QueryType.A).Answers.ARecords().Select(x => x.Address);
-                    Console.WriteLine($"Query {domain} = {string.Join(", ", result)}");
-                    domains[domain].AddRange(result);
+                    try
+                    {
+                        var result = client.Query(domain, QueryType.A).Answers.ARecords().Select(x => x.Address);
+                        Console.WriteLine($"Query {domain} = {string.Join(", ", result)}");
+                        domains[domain].AddRange(result);
+                    }
+                    catch(DnsResponseException)
+                    {
+                        Console.WriteLine($"Query {domain} = **FAILED**");
+                    }
                 }
                 Console.WriteLine();
             }
@@ -94,13 +101,13 @@ namespace DNSRewrite
                 Console.WriteLine("Ping all queried IPs");
                 List<string> totalIPs = domains.SelectMany(x => x.Value).Select(x => x.ToString()).Distinct().ToList();
 
-                ConcurrentDictionary<string, PingReplyCollection> pingResults = new ConcurrentDictionary<string, PingReplyCollection>();
+                ConcurrentDictionary<string, PingReplyMultiple> pingResults = new ConcurrentDictionary<string, PingReplyMultiple>();
                 List<Task> pingTasks = new List<Task>();
                 foreach (string ip in totalIPs)
                 {
                     pingTasks.Add(Task.Run(() =>
                     {
-                        PingReplyCollection pingReplies = PingReplyCollection.Run(ip);
+                        PingReplyMultiple pingReplies = PingReplyMultiple.Run(ip);
                         pingResults.AddOrUpdate(ip, pingReplies, (ip, value) => value);
                         Console.WriteLine(pingReplies);
                     }));
@@ -128,10 +135,10 @@ namespace DNSRewrite
                     // Else, pick the lowest RTT, but success rate > 0
                     else
                     {
-                        PingReplyCollection lowestRttReply = pingResultsOfDomain.First(x => x.SuccessRate > 0);
+                        PingReplyMultiple lowestRttReply = pingResultsOfDomain.First(x => x.SuccessRate > 0);
                         double lowestRtt = lowestRttReply.AverageRtt;
 
-                        foreach (PingReplyCollection replyCollection in pingResultsOfDomain.Where(x => x.SuccessRate > 0))
+                        foreach (PingReplyMultiple replyCollection in pingResultsOfDomain.Where(x => x.SuccessRate > 0))
                         {
                             if (replyCollection.AverageRtt < lowestRtt)
                             {
