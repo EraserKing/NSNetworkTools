@@ -8,6 +8,8 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using DnsClient;
+using Interfaces;
+using MultipleHttpsRequest;
 using MultiplePing;
 
 namespace DNSRewrite
@@ -22,6 +24,7 @@ namespace DNSRewrite
             List<LookupClient> dnsClients = new List<LookupClient>();
             Dictionary<string, List<IPAddress>> domains = new Dictionary<string, List<IPAddress>>();
 
+            // Load domain list and DNS server list
             try
             {
                 domainLines = File.ReadAllLines("domains.txt");
@@ -67,6 +70,7 @@ namespace DNSRewrite
                 return;
             }
 
+            // Query all DNS servers for the domains listed
             foreach (LookupClient client in dnsClients)
             {
                 Console.WriteLine($"DNS server is {client.NameServers.FirstOrDefault().Endpoint}, queries done below will be based on this");
@@ -78,7 +82,7 @@ namespace DNSRewrite
                         Console.WriteLine($"Query {domain} = {string.Join(", ", result)}");
                         domains[domain].AddRange(result);
                     }
-                    catch(DnsResponseException)
+                    catch (DnsResponseException)
                     {
                         Console.WriteLine($"Query {domain} = **FAILED**");
                     }
@@ -87,8 +91,10 @@ namespace DNSRewrite
             }
             Console.WriteLine();
 
+            // Get the final results
             QueryResultCollection finalResults = new QueryResultCollection();
 
+            // If only one DNS server specified, just pick the first query result from resovled IPs
             if (dnsClients.Count == 1)
             {
                 foreach (string domain in domains.Keys)
@@ -98,47 +104,51 @@ namespace DNSRewrite
             }
             else
             {
+                // Ping the IPs
                 Console.WriteLine("Ping all queried IPs");
                 List<string> totalIPs = domains.SelectMany(x => x.Value).Select(x => x.ToString()).Distinct().ToList();
 
-                ConcurrentDictionary<string, PingReplyMultiple> pingResults = new ConcurrentDictionary<string, PingReplyMultiple>();
-                List<Task> pingTasks = new List<Task>();
-                foreach (string ip in totalIPs)
+                ConcurrentDictionary<string, IRequestReply> pingResults = GetResponses(totalIPs, GetResponseType.Ping);
+                ConcurrentDictionary<string, IRequestReply> httpsResults = GetResponses(pingResults.Values.Where(x => x.SuccessRate == 0).Select(x => x.IP), GetResponseType.Http);
+
+                Dictionary<string, IRequestReply> results = new Dictionary<string, IRequestReply>();
+                foreach (string ip in pingResults.Keys)
                 {
-                    pingTasks.Add(Task.Run(() =>
+                    if (pingResults[ip].SuccessRate > 0)
                     {
-                        PingReplyMultiple pingReplies = PingReplyMultiple.Run(ip);
-                        pingResults.AddOrUpdate(ip, pingReplies, (ip, value) => value);
-                        Console.WriteLine(pingReplies);
-                    }));
+                        results.Add(ip, pingResults[ip]);
+                    }
+                    else
+                    {
+                        results.Add(ip, httpsResults[ip]);
+                    }
                 }
-                var pingTaskArray = pingTasks.ToArray();
-                Task.WaitAll(pingTaskArray);
+
                 Console.WriteLine();
 
+                // Group the IPs by domain
                 Console.WriteLine("Query results per domain as group");
                 foreach (string domain in domains.Keys)
                 {
                     Console.WriteLine($">> {domain}");
 
-                    var ips = domains[domain];
-                    var pingResultsOfDomain = ips.Select(x => pingResults[x.ToString()]).Distinct();
+                    var resultsOfDomain = domains[domain].Select(x => results[x.ToString()]).Distinct();
 
-                    Console.WriteLine(string.Join(Environment.NewLine, pingResultsOfDomain));
+                    Console.WriteLine(string.Join(Environment.NewLine, resultsOfDomain));
 
                     // All fail, means the domains bans ping - pick the first one
-                    if (pingResultsOfDomain.All(x => x.SuccessRate == 0))
+                    if (resultsOfDomain.All(x => x.SuccessRate == 0))
                     {
-                        finalResults.Add(new QueryResultCollection.QueryResult(domain, pingResultsOfDomain.First().IP));
+                        finalResults.Add(new QueryResultCollection.QueryResult(domain, resultsOfDomain.First().IP));
                     }
 
                     // Else, pick the lowest RTT, but success rate > 0
                     else
                     {
-                        PingReplyMultiple lowestRttReply = pingResultsOfDomain.First(x => x.SuccessRate > 0);
+                        IRequestReply lowestRttReply = resultsOfDomain.First(x => x.SuccessRate > 0);
                         double lowestRtt = lowestRttReply.AverageRtt;
 
-                        foreach (PingReplyMultiple replyCollection in pingResultsOfDomain.Where(x => x.SuccessRate > 0))
+                        foreach (IRequestReply replyCollection in resultsOfDomain.Where(x => x.SuccessRate > 0))
                         {
                             if (replyCollection.AverageRtt < lowestRtt)
                             {
@@ -155,6 +165,43 @@ namespace DNSRewrite
             Console.WriteLine();
             Console.WriteLine("Query results in the best combination");
             Console.WriteLine(string.Join(Environment.NewLine, finalResults));
+        }
+
+
+        public enum GetResponseType
+        {
+            Ping,
+            Http
+        }
+
+        private static ConcurrentDictionary<string, IRequestReply> GetResponses(IEnumerable<string> totalIPs, GetResponseType getResponseType)
+        {
+            ConcurrentDictionary<string, IRequestReply> pingResults = new ConcurrentDictionary<string, IRequestReply>();
+            List<Task> pingTasks = new List<Task>();
+            foreach (string ip in totalIPs)
+            {
+                pingTasks.Add(Task.Run(() =>
+                {
+                    IRequestReply replies = null;
+
+                    switch (getResponseType)
+                    {
+                        case GetResponseType.Ping:
+                            replies = PingReplyMultiple.Run(ip);
+                            break;
+
+                        case GetResponseType.Http:
+                            replies = HttpsReplyMultiple.Run(ip);
+                            break;
+                    }
+
+                    pingResults.AddOrUpdate(ip, replies, (ip, value) => value);
+                    Console.WriteLine(replies);
+                }));
+            }
+            var pingTaskArray = pingTasks.ToArray();
+            Task.WaitAll(pingTaskArray);
+            return pingResults;
         }
 
         public class QueryResultCollection : IEnumerable<QueryResultCollection.QueryResult>

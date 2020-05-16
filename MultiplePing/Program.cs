@@ -1,8 +1,11 @@
-﻿using System;
+﻿using Interfaces;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Net.Security;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -50,10 +53,10 @@ namespace MultiplePing
         }
     }
 
-    public class PingReplyMultiple
+    public class PingReplyMultiple: IRequestReply
     {
         public PingReply[] Replies;
-        public string IP;
+        public string IP { get; private set; }
 
         private double? successRate;
         private double? averageRtt;
@@ -71,7 +74,7 @@ namespace MultiplePing
 
         public double SuccessRate => successRate ??= 1.0 * Replies.Count(x => x.Status == IPStatus.Success) / Replies.Length;
         public double AverageRtt => averageRtt ??= Replies.Average(x => x.RoundtripTime);
-        public override string ToString() => $"{IP}, Success Rate = {SuccessRate * 100.0}%, Avg RTT (ms) = {AverageRtt}";
+        public override string ToString() => $"{IP}, Success Rate = {SuccessRate * 100.0}%, Avg RTT (ms) = {AverageRtt}, by ping";
     }
 
     public class PingUtility

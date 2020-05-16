@@ -10,6 +10,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Interfaces\Interfaces.csproj" />
+    <ProjectReference Include="..\MultipleHttpsRequest\MultipleHttpsRequest.csproj" />
     <ProjectReference Include="..\MultiplePing\MultiplePing.csproj" />
   </ItemGroup>
 
